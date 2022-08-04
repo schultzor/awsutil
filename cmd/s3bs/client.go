@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"sync"
@@ -34,7 +37,7 @@ func searchWorker(ctx context.Context,
 			log.Fatal("error invoking lambda for", i, err)
 		}
 		if res.FunctionError != nil {
-			log.Println("function error on batch", i.Index, res.FunctionError)
+			log.Println("function error on batch", i.Index, *res.FunctionError)
 		}
 		var rmsg result
 		if err := json.Unmarshal(res.Payload, &rmsg); err != nil {
@@ -58,6 +61,12 @@ func stdoutWriter(ctx context.Context, outputs chan result) {
 		}
 		if r.Truncated != "" {
 			fmt.Fprintln(os.Stderr, "truncated results:", r.Truncated)
+		}
+		if len(r.GzipMatches) > 0 {
+			if gzReader, err := gzip.NewReader(bytes.NewReader(r.GzipMatches)); err == nil {
+				io.Copy(os.Stdout, gzReader)
+				gzReader.Close()
+			}
 		}
 		accum += r.Took
 		count += 1
