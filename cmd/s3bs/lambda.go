@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -13,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-const ResultLimitBytes = 1024 * 1024 * 5.5 // 6MB lambda payload limit
+const ResultLimitBytes = 1024 * 1024 * 5 // keep us under 6MB lambda payload limit
 
 //  a wrapper for a gzip reader so we retain the original Closer
 type gzCloser struct {
@@ -24,26 +25,27 @@ type gzCloser struct {
 func (g gzCloser) Read(p []byte) (n int, err error) { return g.Reader.Read(p) }
 func (g gzCloser) Close() error                     { return g.Closer.Close() }
 
-func scanJsonObjects(ctx context.Context, filter gval.Evaluable, contents io.ReadCloser) ([]string, error) {
-	var ret []string
+func scanJsonObjects(ctx context.Context, filter gval.Evaluable, contents io.ReadCloser, output io.Writer) error {
 	defer contents.Close()
+	encoder := json.NewEncoder(output)
 	decoder := json.NewDecoder(contents)
 	for decoder.More() {
 		var logEntry map[string]any
 		if err := decoder.Decode(&logEntry); err != nil {
-			return ret, err
+			return err
 		}
 		filterMatch, err := filter.EvalBool(ctx, logEntry)
 		if err != nil {
-			return ret, err
+			return err
 		}
 		if filterMatch {
-			if b, err := json.Marshal(logEntry); err == nil {
-				ret = append(ret, string(b))
+
+			if err := encoder.Encode(logEntry); err != nil {
+				return err
 			}
 		}
 	}
-	return ret, nil
+	return nil
 }
 
 func getReader(ctx context.Context, client *s3.Client, bucket, key string) (io.ReadCloser, error) {
@@ -68,12 +70,13 @@ func lambdaEntry(ctx context.Context, input batch) (result, error) {
 	ret := result{Index: input.Index}
 	filter, err := getEvaluable(input.Expr)
 	if err != nil {
-		log.Fatalf("error evaluating expression '%s': %v", input.Expr, err)
+		return ret, fmt.Errorf("error evaluating expression '%s': %v", input.Expr, err)
 	}
+	var bb bytes.Buffer
+	gzOut := gzip.NewWriter(&bb)
 	s3svc := s3.NewFromConfig(getAwsConfig(ctx, input.Region))
-	var byteCount int
 	for ki, k := range input.Keys {
-		if byteCount >= ResultLimitBytes {
+		if bb.Len() >= ResultLimitBytes {
 			skipped := input.Keys[ki:]
 			ret.Truncated = fmt.Sprintf("skipping %s", strings.Join(skipped, ","))
 			log.Println(ret.Truncated)
@@ -86,14 +89,11 @@ func lambdaEntry(ctx context.Context, input batch) (result, error) {
 			continue
 		}
 		// TODO: allow for regex/non-json scanning here?
-		if matches, err := scanJsonObjects(ctx, filter, body); err == nil {
-			for _, m := range matches {
-				byteCount += len(m)
-				ret.Matches = append(ret.Matches, m)
-			}
-		} else {
+		if err := scanJsonObjects(ctx, filter, body, gzOut); err != nil {
 			ret.Errors = append(ret.Errors, fmt.Sprintf("error scanning object %s: %v", k, err))
 		}
 	}
+	gzOut.Flush()
+	ret.GzipMatches = bb.Bytes()
 	return ret, nil
 }

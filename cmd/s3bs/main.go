@@ -21,11 +21,12 @@ type batch struct {
 }
 
 type result struct {
-	Index     int      `json:"index"`
-	Truncated string   `json:"truncated"`
-	Matches   []string `json:"matches"`
-	Errors    []string `json:"errors"`
-	Took      time.Duration
+	Index       int      `json:"index"`
+	Truncated   string   `json:"truncated"`
+	Matches     []string `json:"matches"`
+	GzipMatches []byte   `json:"gzipMatches"`
+	Errors      []string `json:"errors"`
+	Took        time.Duration
 }
 
 func getAwsConfig(ctx context.Context, region string) aws.Config {
