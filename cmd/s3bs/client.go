@@ -74,15 +74,12 @@ func clientEntry() {
 	region := flag.String("region", defaultRegion, "AWS region for bucket")
 	workerCount := flag.Int("workers", 50, "number of search workers")
 	batchSize := flag.Int("batchSize", 50, "number of s3 objects per lambda invocation")
-	lambdaName := flag.String("lambdaName", "", "name of lambda worker function")
+	lambdaName := flag.String("lambdaName", "s3bs-worker", "name of lambda worker function")
 	lambdaRegion := flag.String("lambdaRegion", defaultRegion, "AWS region where lambda lives")
 	flag.Parse()
 
 	if *bucket == "" {
 		log.Fatal("missing -bucket value")
-	}
-	if *lambdaName == "" {
-		log.Fatal("missing -lambdaName value")
 	}
 	if _, err := getEvaluable(*expr); err != nil {
 		log.Fatalf("error evaluating expression '%s': %v", *expr, err)
@@ -111,7 +108,6 @@ func clientEntry() {
 		if len(keys) < threshold {
 			return
 		}
-		log.Println("sending batch", batchCount, "of", len(keys), "objects")
 		inputs <- batch{
 			Index:  batchCount,
 			Bucket: *bucket,
