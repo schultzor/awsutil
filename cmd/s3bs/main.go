@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -21,9 +22,10 @@ type batch struct {
 
 type result struct {
 	Index     int      `json:"index"`
-	Truncated bool     `json:"truncated"`
+	Truncated string   `json:"truncated"`
 	Matches   []string `json:"matches"`
 	Errors    []string `json:"errors"`
+	Took      time.Duration
 }
 
 func getAwsConfig(ctx context.Context, region string) aws.Config {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -24,6 +26,7 @@ func searchWorker(ctx context.Context,
 		if err != nil {
 			log.Fatal("marshalling error", err)
 		}
+		start := time.Now()
 		res, err := client.Invoke(ctx, &lambda.InvokeInput{
 			FunctionName: &lambdaName,
 			Payload:      payload})
@@ -37,15 +40,29 @@ func searchWorker(ctx context.Context,
 		if err := json.Unmarshal(res.Payload, &rmsg); err != nil {
 			log.Fatal("unmarshalling error", err)
 		}
+		rmsg.Took = time.Since(start)
 		output <- rmsg
 	}
 	wg.Done()
 }
 
 func stdoutWriter(ctx context.Context, outputs chan result) {
+	var accum time.Duration
+	var count int
 	for r := range outputs {
-		log.Println("result", r)
+		for _, e := range r.Errors {
+			fmt.Fprintln(os.Stdout, "error:", e)
+		}
+		for _, m := range r.Matches {
+			fmt.Fprintln(os.Stdout, "match:", m)
+		}
+		if r.Truncated != "" {
+			fmt.Fprintln(os.Stdout, "truncated results:", r.Truncated)
+		}
+		accum += r.Took
+		count += 1
 	}
+	log.Println("all done, average batch duration:", accum/time.Duration(count))
 }
 
 const defaultRegion = "us-east-1"
@@ -77,6 +94,7 @@ func clientEntry() {
 	go stdoutWriter(ctx, outputs)
 	var wg sync.WaitGroup
 
+	log.Printf("starting %d search workers", *workerCount)
 	for i := 0; i < *workerCount; i++ {
 		wg.Add(1)
 		go searchWorker(ctx, &wg, inputs, outputs, *lambdaName, *lambdaRegion)
@@ -93,6 +111,7 @@ func clientEntry() {
 		if len(keys) < threshold {
 			return
 		}
+		log.Println("sending batch", batchCount, "of", len(keys), "objects")
 		inputs <- batch{
 			Index:  batchCount,
 			Bucket: *bucket,
@@ -116,10 +135,9 @@ func clientEntry() {
 			sendBatch(*batchSize)
 		}
 	}
-	log.Println("found", keyCount, "keys in", time.Since(listStart))
+	log.Println("found", keyCount, "keys in", time.Since(listStart), ", split into", batchCount, "batches")
 	sendBatch(1)
 	close(inputs)
 	wg.Wait()
 	close(outputs)
-
 }

@@ -13,6 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+const ResultLimitBytes = 1024 * 1024 * 5.5 // 6MB lambda payload limit
+
 //  a wrapper for a gzip reader so we retain the original Closer
 type gzCloser struct {
 	Reader io.Reader
@@ -69,18 +71,28 @@ func lambdaEntry(ctx context.Context, input batch) (result, error) {
 		log.Fatalf("error evaluating expression '%s': %v", input.Expr, err)
 	}
 	s3svc := s3.NewFromConfig(getAwsConfig(ctx, input.Region))
-	for _, k := range input.Keys {
+	var byteCount int
+	for ki, k := range input.Keys {
+		if byteCount >= ResultLimitBytes {
+			skipped := input.Keys[ki:]
+			ret.Truncated = fmt.Sprintf("skipping %s", strings.Join(skipped, ","))
+			log.Println(ret.Truncated)
+			break
+		}
 		log.Println("scanning object at", input.Bucket, k)
 		body, err := getReader(ctx, s3svc, input.Bucket, k)
 		if err != nil {
-			ret.Errors = append(ret.Errors, fmt.Sprint("error reading object", k, err))
+			ret.Errors = append(ret.Errors, fmt.Sprintf("error reading object %s: %v", k, err))
 			continue
 		}
 		// TODO: allow for regex/non-json scanning here?
 		if matches, err := scanJsonObjects(ctx, filter, body); err == nil {
-			ret.Matches = append(ret.Matches, matches...)
+			for _, m := range matches {
+				byteCount += len(m)
+				ret.Matches = append(ret.Matches, m)
+			}
 		} else {
-			ret.Matches = append(ret.Matches, fmt.Sprint("error scanning object", k, err))
+			ret.Errors = append(ret.Errors, fmt.Sprintf("error scanning object %s: %v", k, err))
 		}
 	}
 	return ret, nil
