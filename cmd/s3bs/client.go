@@ -31,7 +31,7 @@ func searchWorker(ctx context.Context,
 			log.Fatal("error invoking lambda for", i, err)
 		}
 		if res.FunctionError != nil {
-			log.Println("function error on", i, res.FunctionError)
+			log.Println("function error on batch", i.Index, res.FunctionError)
 		}
 		var rmsg result
 		if err := json.Unmarshal(res.Payload, &rmsg); err != nil {
@@ -48,26 +48,27 @@ func stdoutWriter(ctx context.Context, outputs chan result) {
 	}
 }
 
+const defaultRegion = "us-east-1"
+
 func clientEntry() {
 	bucket := flag.String("bucket", "", "s3 bucket to search")
 	prefix := flag.String("prefix", "", "limit search to a prefix in the bucket")
 	expr := flag.String("expr", "true", "gval search expression (which evaluates to a bool)")
-	region := flag.String("region", "us-east-1", "AWS region for bucket")
+	region := flag.String("region", defaultRegion, "AWS region for bucket")
 	workerCount := flag.Int("workers", 50, "number of search workers")
-	batchSize := flag.Int("batchSize", 50, "number of s3 objects per batch")
+	batchSize := flag.Int("batchSize", 50, "number of s3 objects per lambda invocation")
 	lambdaName := flag.String("lambdaName", "", "name of lambda worker function")
-	lambdaRegion := flag.String("lambdaRegion", "", "AWS region where lambda lives")
+	lambdaRegion := flag.String("lambdaRegion", defaultRegion, "AWS region where lambda lives")
 	flag.Parse()
 
 	if *bucket == "" {
-		log.Fatal("missing bucket value")
+		log.Fatal("missing -bucket value")
 	}
-	if *region == "" {
-		log.Fatal("missing region value")
+	if *lambdaName == "" {
+		log.Fatal("missing -lambdaName value")
 	}
-	if *lambdaRegion == "" {
-		*lambdaRegion = *region
-		log.Println("defaulting lambda region to", *lambdaRegion)
+	if _, err := getEvaluable(*expr); err != nil {
+		log.Fatalf("error evaluating expression '%s': %v", *expr, err)
 	}
 
 	ctx := context.TODO()
@@ -93,11 +94,11 @@ func clientEntry() {
 			return
 		}
 		inputs <- batch{
-			index:  batchCount,
-			bucket: *bucket,
-			region: *region,
-			keys:   keys,
-			expr:   *expr,
+			Index:  batchCount,
+			Bucket: *bucket,
+			Region: *region,
+			Keys:   keys,
+			Expr:   *expr,
 		}
 		keyCount += len(keys)
 		keys = nil

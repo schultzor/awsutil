@@ -1,3 +1,4 @@
+// main entry point that determines if we're executing as the local client or the lambda worker
 package main
 
 import (
@@ -11,30 +12,27 @@ import (
 )
 
 type batch struct {
-	index  int
-	bucket string
-	region string
-	keys   []string
-	expr   string
+	Index  int      `json:"index"`
+	Bucket string   `json:"bucket"`
+	Region string   `json:"region"`
+	Keys   []string `json:"keys"`
+	Expr   string   `json:"expr"`
 }
 
 type result struct {
-	index     int
-	truncated bool
-	matches   []byte
+	Index     int      `json:"index"`
+	Truncated bool     `json:"truncated"`
+	Matches   []string `json:"matches"`
+	Errors    []string `json:"errors"`
 }
 
-var configForRegion = make(map[string]aws.Config)
-
 func getAwsConfig(ctx context.Context, region string) aws.Config {
-	if _, ok := configForRegion[region]; !ok {
-		if cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region)); err == nil {
-			configForRegion[region] = cfg
-		} else {
-			log.Fatalf("unable to load AWS config, %v", err)
-		}
+	if cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region)); err == nil {
+		return cfg
+	} else {
+		log.Fatalf("unable to load AWS config, %v", err)
 	}
-	return configForRegion[region]
+	return aws.Config{}
 }
 
 func main() {
