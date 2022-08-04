@@ -51,13 +51,13 @@ func stdoutWriter(ctx context.Context, outputs chan result) {
 	var count int
 	for r := range outputs {
 		for _, e := range r.Errors {
-			fmt.Fprintln(os.Stdout, "error:", e)
+			fmt.Fprintln(os.Stderr, "search error:", e)
 		}
 		for _, m := range r.Matches {
-			fmt.Fprintln(os.Stdout, "match:", m)
+			fmt.Fprintln(os.Stdout, m)
 		}
 		if r.Truncated != "" {
-			fmt.Fprintln(os.Stdout, "truncated results:", r.Truncated)
+			fmt.Fprintln(os.Stderr, "truncated results:", r.Truncated)
 		}
 		accum += r.Took
 		count += 1
